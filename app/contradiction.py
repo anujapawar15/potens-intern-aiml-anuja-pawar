@@ -1,16 +1,12 @@
 """
-Core pipeline for the /contradict endpoint.
-
-Retrieves the most relevant chunks from each of the two requested documents
-(filtered by topic if one is given, otherwise all chunks up to a cap), then
-asks the LLM to judge whether the two sets of excerpts contradict each
-other. The prompt forces a JSON response with an explicit
-"insufficient_evidence" option so the model states uncertainty instead of
-guessing when the retrieved excerpts don't overlap in subject matter.
+Core pipeline for the /contradict endpoint: fetch relevant chunks from each
+document, then ask the LLM to judge whether they contradict (or return
+"insufficient_evidence" if the excerpts don't overlap enough to judge).
 """
 import time
 
 from app.config import DEFAULT_TOP_K
+from app.citations import to_citations
 from app.embeddings import embed_query
 from app.vector_store import query as vector_query, get_by_doc_id
 from app.reranker import rerank
@@ -44,28 +40,25 @@ def _fetch_doc_chunks(doc_id: str, topic: str | None, top_k: int) -> list[dict]:
     chunks = []
     for text, meta, chunk_id in zip(raw["documents"], raw["metadatas"], raw["ids"]):
         chunks.append({"chunk_id": chunk_id, "text": text, "source": meta["source"], "page": meta["page"], "rerank_score": 1.0})
-    chunks.sort(key=lambda c: c["chunk_id"])
+    chunks.sort(key=lambda chunk: chunk["chunk_id"])
     return chunks[:MAX_CHUNKS_NO_TOPIC]
 
 
 def _build_labeled_block(chunks: list[dict], prefix: str) -> str:
     lines = []
-    for i, c in enumerate(chunks, start=1):
-        lines.append(f"[{prefix}{i}] (source: {c['source']}, page: {c['page']}):\n{c['text']}")
+    for i, chunk in enumerate(chunks, start=1):
+        lines.append(f"[{prefix}{i}] (source: {chunk['source']}, page: {chunk['page']}):\n{chunk['text']}")
     return "\n\n".join(lines)
 
 
-def _to_citations(chunks: list[dict]) -> list[dict]:
-    return [
-        {
-            "source": c["source"],
-            "page": c["page"],
-            "chunk_id": c["chunk_id"],
-            "snippet": c["text"][:300] + ("..." if len(c["text"]) > 300 else ""),
-            "relevance_score": round(c.get("rerank_score", 1.0), 4),
-        }
-        for c in chunks
-    ]
+def _build_response(verdict: str, reasoning: str, chunks_1: list[dict], chunks_2: list[dict], start_time: float) -> dict:
+    return {
+        "verdict": verdict,
+        "reasoning": reasoning,
+        "evidence_doc_1": to_citations(chunks_1),
+        "evidence_doc_2": to_citations(chunks_2),
+        "response_time_seconds": round(time.perf_counter() - start_time, 3),
+    }
 
 
 def compare_documents(doc_id_1: str, doc_id_2: str, topic: str | None = None, top_k: int | None = None) -> dict:
@@ -77,13 +70,8 @@ def compare_documents(doc_id_1: str, doc_id_2: str, topic: str | None = None, to
 
     if not chunks_1 or not chunks_2:
         missing = doc_id_1 if not chunks_1 else doc_id_2
-        return {
-            "verdict": "insufficient_evidence",
-            "reasoning": f"No content could be retrieved for document '{missing}'. Check that the doc_id is correct and the document has been ingested.",
-            "evidence_doc_1": _to_citations(chunks_1),
-            "evidence_doc_2": _to_citations(chunks_2),
-            "response_time_seconds": round(time.perf_counter() - start_time, 3),
-        }
+        reasoning = f"No content could be retrieved for document '{missing}'. Check that the doc_id is correct and the document has been ingested."
+        return _build_response("insufficient_evidence", reasoning, chunks_1, chunks_2, start_time)
 
     block_1 = _build_labeled_block(chunks_1, "A")
     block_2 = _build_labeled_block(chunks_2, "B")
@@ -97,23 +85,12 @@ def compare_documents(doc_id_1: str, doc_id_2: str, topic: str | None = None, to
     try:
         result = chat_completion_json(SYSTEM_PROMPT, user_prompt, temperature=0.0)
     except LLMError as exc:
-        return {
-            "verdict": "insufficient_evidence",
-            "reasoning": f"Could not obtain a judgment from the LLM: {exc}",
-            "evidence_doc_1": _to_citations(chunks_1),
-            "evidence_doc_2": _to_citations(chunks_2),
-            "response_time_seconds": round(time.perf_counter() - start_time, 3),
-        }
+        reasoning = f"Could not obtain a judgment from the LLM: {exc}"
+        return _build_response("insufficient_evidence", reasoning, chunks_1, chunks_2, start_time)
 
     verdict = result.get("verdict", "insufficient_evidence")
     if verdict not in VALID_VERDICTS:
         verdict = "insufficient_evidence"
     reasoning = result.get("reasoning", "The model did not return a reasoning field.")
 
-    return {
-        "verdict": verdict,
-        "reasoning": reasoning,
-        "evidence_doc_1": _to_citations(chunks_1),
-        "evidence_doc_2": _to_citations(chunks_2),
-        "response_time_seconds": round(time.perf_counter() - start_time, 3),
-    }
+    return _build_response(verdict, reasoning, chunks_1, chunks_2, start_time)

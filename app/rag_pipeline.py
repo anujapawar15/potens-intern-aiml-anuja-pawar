@@ -1,21 +1,12 @@
 """
-Core RAG pipeline for the /ask endpoint:
-
-  1. detect language, translate question to English if needed
-  2. embed the (English) question and fetch a wide candidate pool from Chroma
-  3. rerank candidates with a cross-encoder, keep the true top_k
-  4. build a numbered context block and ask the LLM to answer ONLY from it
-  5. compute a confidence score from the reranker's relevance scores
-  6. translate the answer back to the question's original language
-
-Hallucination prevention relies on two layers: a strict system prompt that
-forbids using outside knowledge and instructs an explicit "not found" reply,
-and a confidence score computed independently of the LLM (from retrieval
-relevance) so a low score is visible even if the model answers anyway.
+Core pipeline for the /ask endpoint: translate -> retrieve -> rerank ->
+generate -> translate back. See README.md sections 4-5 and 7-8 for the
+chunking/retrieval/multilingual/hallucination-prevention rationale.
 """
 import time
 
 from app.config import DEFAULT_TOP_K, RERANK_MULTIPLIER, CONFIDENCE_THRESHOLD
+from app.citations import to_citations
 from app.embeddings import embed_query
 from app.vector_store import query as vector_query, collection_count
 from app.reranker import rerank
@@ -57,8 +48,8 @@ def _fetch_candidates(query_embedding: list[float], n: int, where: dict | None =
 
 def _build_context_block(ranked: list[dict]) -> str:
     lines = []
-    for i, c in enumerate(ranked, start=1):
-        lines.append(f"[{i}] (source: {c['source']}, page: {c['page']}):\n{c['text']}")
+    for i, chunk in enumerate(ranked, start=1):
+        lines.append(f"[{i}] (source: {chunk['source']}, page: {chunk['page']}):\n{chunk['text']}")
     return "\n\n".join(lines)
 
 
@@ -90,30 +81,19 @@ def answer_question(question: str, top_k: int | None = None) -> dict:
         confidence = 0.0
     else:
         ranked = rerank(english_question, candidates, top_k=top_k)
-        confidence = sum(c["rerank_score"] for c in ranked) / len(ranked)
+        confidence = sum(chunk["rerank_score"] for chunk in ranked) / len(ranked)
         context_block = _build_context_block(ranked)
         user_prompt = f"Context:\n{context_block}\n\nQuestion: {english_question}"
         answer_en = chat_completion(SYSTEM_PROMPT, user_prompt, temperature=0.0).strip()
 
     final_answer = translate_from_english(answer_en, detected_lang)
 
-    citations = [
-        {
-            "source": c["source"],
-            "page": c["page"],
-            "chunk_id": c["chunk_id"],
-            "snippet": c["text"][:300] + ("..." if len(c["text"]) > 300 else ""),
-            "relevance_score": round(c["rerank_score"], 4),
-        }
-        for c in ranked
-    ]
-
     return {
         "answer": final_answer,
-        "citations": citations,
+        "citations": to_citations(ranked),
         "confidence": round(confidence, 4),
         "low_confidence_warning": confidence < CONFIDENCE_THRESHOLD,
         "detected_language": detected_lang,
-        "retrieved_context": [c["text"] for c in ranked],
+        "retrieved_context": [chunk["text"] for chunk in ranked],
         "response_time_seconds": round(time.perf_counter() - start_time, 3),
     }
