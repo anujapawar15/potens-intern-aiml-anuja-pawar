@@ -29,12 +29,32 @@ def _get_documents():
         return []
 
 
+SUGGESTED_QUESTIONS = [
+    "How many remote work days are employees allowed?",
+    "What is the password policy?",
+    "How many days of annual leave do employees accrue?",
+]
+
 with tab_ask:
     st.subheader("Ask a question about the ingested documents")
 
+    if "question_input" not in st.session_state:
+        st.session_state.question_input = ""
+
+    st.caption("Try one of these:")
+    suggestion_cols = st.columns(len(SUGGESTED_QUESTIONS))
+    for col, suggestion in zip(suggestion_cols, SUGGESTED_QUESTIONS):
+        if col.button(suggestion, key=f"suggestion_{suggestion}"):
+            st.session_state.question_input = suggestion
+
     col1, col2 = st.columns([4, 1])
     with col1:
-        question = st.text_area("Question", placeholder="e.g. How many remote work days are employees allowed?", height=80)
+        question = st.text_area(
+            "Question",
+            placeholder="e.g. How many remote work days are employees allowed?",
+            height=80,
+            key="question_input",
+        )
     with col2:
         top_k = st.slider("Top K", min_value=1, max_value=15, value=5)
 
