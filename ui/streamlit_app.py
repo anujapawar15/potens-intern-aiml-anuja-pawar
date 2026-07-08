@@ -35,6 +35,18 @@ SUGGESTED_QUESTIONS = [
     "How many days of annual leave do employees accrue?",
 ]
 
+SUGGESTED_QUESTIONS_HINDI = [
+    "पासवर्ड नीति क्या है?",  # What is the password policy?
+    "कर्मचारी सप्ताह में कितने दिन दूर से काम कर सकते हैं?",  # How many days a week can employees work remotely?
+    "वार्षिक अवकाश की नीति क्या है?",  # What is the annual leave policy?
+]
+
+SUGGESTED_QUESTIONS_MARATHI = [
+    "पासवर्ड धोरण काय आहे?",  # What is the password policy?
+    "कर्मचाऱ्यांना वार्षिक किती दिवस रजा मिळते?",  # How many annual leave days do employees get?
+    "कर्मचारी दर आठवड्याला किती दिवस घरून काम करू शकतात?",  # How many days per week can employees work from home?
+]
+
 with tab_ask:
     st.subheader("Ask a question about the ingested documents")
 
@@ -45,6 +57,18 @@ with tab_ask:
     suggestion_cols = st.columns(len(SUGGESTED_QUESTIONS))
     for col, suggestion in zip(suggestion_cols, SUGGESTED_QUESTIONS):
         if col.button(suggestion, key=f"suggestion_{suggestion}"):
+            st.session_state.question_input = suggestion
+
+    st.caption("Try in Hindi:")
+    hindi_cols = st.columns(len(SUGGESTED_QUESTIONS_HINDI))
+    for col, suggestion in zip(hindi_cols, SUGGESTED_QUESTIONS_HINDI):
+        if col.button(suggestion, key=f"suggestion_hi_{suggestion}"):
+            st.session_state.question_input = suggestion
+
+    st.caption("Try in Marathi:")
+    marathi_cols = st.columns(len(SUGGESTED_QUESTIONS_MARATHI))
+    for col, suggestion in zip(marathi_cols, SUGGESTED_QUESTIONS_MARATHI):
+        if col.button(suggestion, key=f"suggestion_mr_{suggestion}"):
             st.session_state.question_input = suggestion
 
     col1, col2 = st.columns([4, 1])
