@@ -13,10 +13,12 @@ import streamlit as st
 
 API_BASE_URL = os.getenv("RAG_API_URL", "http://127.0.0.1:8000")
 
-st.set_page_config(page_title="RAG Document Q&A", layout="wide")
-st.title("RAG Document Q&A")
+st.set_page_config(page_title="RAG Document Q&A", page_icon="📄", layout="wide")
+st.title("📄 RAG Document Q&A")
+st.caption("Ask questions across your documents — every answer is cited, confidence-scored, and gated for human review.")
+st.divider()
 
-tab_ask, tab_contradict = st.tabs(["Ask a Question", "Compare Documents (Contradiction Check)"])
+tab_ask, tab_contradict = st.tabs(["🔎 Ask a Question", "⚖️ Compare Documents (Contradiction Check)"])
 
 
 def _get_documents():
@@ -48,41 +50,44 @@ SUGGESTED_QUESTIONS_MARATHI = [
 ]
 
 with tab_ask:
-    st.subheader("Ask a question about the ingested documents")
-
     if "question_input" not in st.session_state:
         st.session_state.question_input = ""
 
-    st.caption("Try one of these:")
-    suggestion_cols = st.columns(len(SUGGESTED_QUESTIONS))
-    for col, suggestion in zip(suggestion_cols, SUGGESTED_QUESTIONS):
-        if col.button(suggestion, key=f"suggestion_{suggestion}"):
-            st.session_state.question_input = suggestion
+    with st.container(border=True):
+        st.subheader("Ask a question about the ingested documents")
 
-    st.caption("Try in Hindi:")
-    hindi_cols = st.columns(len(SUGGESTED_QUESTIONS_HINDI))
-    for col, suggestion in zip(hindi_cols, SUGGESTED_QUESTIONS_HINDI):
-        if col.button(suggestion, key=f"suggestion_hi_{suggestion}"):
-            st.session_state.question_input = suggestion
+        st.caption("Try one of these:")
+        suggestion_cols = st.columns(len(SUGGESTED_QUESTIONS))
+        for col, suggestion in zip(suggestion_cols, SUGGESTED_QUESTIONS):
+            if col.button(suggestion, key=f"suggestion_{suggestion}"):
+                st.session_state.question_input = suggestion
 
-    st.caption("Try in Marathi:")
-    marathi_cols = st.columns(len(SUGGESTED_QUESTIONS_MARATHI))
-    for col, suggestion in zip(marathi_cols, SUGGESTED_QUESTIONS_MARATHI):
-        if col.button(suggestion, key=f"suggestion_mr_{suggestion}"):
-            st.session_state.question_input = suggestion
+        st.caption("Try in Hindi:")
+        hindi_cols = st.columns(len(SUGGESTED_QUESTIONS_HINDI))
+        for col, suggestion in zip(hindi_cols, SUGGESTED_QUESTIONS_HINDI):
+            if col.button(suggestion, key=f"suggestion_hi_{suggestion}"):
+                st.session_state.question_input = suggestion
 
-    col1, col2 = st.columns([4, 1])
-    with col1:
-        question = st.text_area(
-            "Question",
-            placeholder="e.g. How many remote work days are employees allowed?",
-            height=80,
-            key="question_input",
-        )
-    with col2:
-        top_k = st.slider("Top K", min_value=1, max_value=15, value=5)
+        st.caption("Try in Marathi:")
+        marathi_cols = st.columns(len(SUGGESTED_QUESTIONS_MARATHI))
+        for col, suggestion in zip(marathi_cols, SUGGESTED_QUESTIONS_MARATHI):
+            if col.button(suggestion, key=f"suggestion_mr_{suggestion}"):
+                st.session_state.question_input = suggestion
 
-    if st.button("Ask", type="primary", key="ask_btn"):
+        col1, col2 = st.columns([4, 1])
+        with col1:
+            question = st.text_area(
+                "Question",
+                placeholder="e.g. How many remote work days are employees allowed?",
+                height=80,
+                key="question_input",
+            )
+        with col2:
+            top_k = st.slider("Top K", min_value=1, max_value=15, value=5)
+
+        ask_clicked = st.button("Ask", type="primary", key="ask_btn")
+
+    if ask_clicked:
         if not question.strip():
             st.warning("Please enter a question.")
         else:
@@ -103,81 +108,88 @@ with tab_ask:
                 st.session_state.ask_run_id = st.session_state.get("ask_run_id", 0) + 1
                 conf = data["confidence"]
 
-                if data["low_confidence_warning"]:
-                    st.warning(
-                        f"Low confidence ({conf:.2f}). The retrieved context may not fully support this "
-                        "answer - review the citations below before trusting it."
-                    )
-                    revealed = st.checkbox(
-                        "I've reviewed the citations and want to see the generated answer anyway",
-                        key=f"reveal_answer_{st.session_state.ask_run_id}",
-                    )
-                    st.markdown("### Answer")
-                    if revealed:
-                        st.write(data["answer"])
+                with st.container(border=True):
+                    if data["low_confidence_warning"]:
+                        st.warning(
+                            f"Low confidence ({conf:.2f}). The retrieved context may not fully support this "
+                            "answer - review the citations below before trusting it."
+                        )
+                        revealed = st.checkbox(
+                            "I've reviewed the citations and want to see the generated answer anyway",
+                            key=f"reveal_answer_{st.session_state.ask_run_id}",
+                        )
+                        st.markdown("### Answer")
+                        if revealed:
+                            st.write(data["answer"])
+                        else:
+                            st.info("Answer held back pending your review, since confidence is below the threshold.")
                     else:
-                        st.info("Answer held back pending your review, since confidence is below the threshold.")
-                else:
-                    st.success(f"Confidence: {conf:.2f}")
-                    st.markdown("### Answer")
-                    st.write(data["answer"])
+                        st.success(f"Confidence: {conf:.2f}")
+                        st.markdown("### Answer")
+                        st.write(data["answer"])
 
-                meta_col1, meta_col2 = st.columns(2)
-                meta_col1.metric("Detected language", data["detected_language"])
-                meta_col2.metric("Response time (s)", data["response_time_seconds"])
+                    meta_col1, meta_col2 = st.columns(2)
+                    meta_col1.metric("Detected language", data["detected_language"])
+                    meta_col2.metric("Response time (s)", data["response_time_seconds"])
 
-                st.markdown("### Citations")
-                if data["citations"]:
-                    for i, c in enumerate(data["citations"], start=1):
-                        with st.expander(f"[{i}] {c['source']} - page {c['page']} (score: {c['relevance_score']:.2f})"):
-                            st.caption(f"chunk_id: {c['chunk_id']}")
-                            st.write(c["snippet"])
-                else:
-                    st.info("No citations - the documents did not contain relevant information.")
+                with st.container(border=True):
+                    st.markdown("### Citations")
+                    if data["citations"]:
+                        for i, c in enumerate(data["citations"], start=1):
+                            with st.expander(f"[{i}] {c['source']} - page {c['page']} (score: {c['relevance_score']:.2f})"):
+                                st.caption(f"chunk_id: {c['chunk_id']}")
+                                st.write(c["snippet"])
+                    else:
+                        st.info("No citations - the documents did not contain relevant information.")
 
-                with st.expander("Full retrieved context"):
-                    for i, ctx in enumerate(data["retrieved_context"], start=1):
-                        st.markdown(f"**[{i}]**")
-                        st.write(ctx)
+                    with st.expander("Full retrieved context"):
+                        for i, ctx in enumerate(data["retrieved_context"], start=1):
+                            st.markdown(f"**[{i}]**")
+                            st.write(ctx)
 
 with tab_contradict:
-    st.subheader("Compare two documents for contradictions")
+    with st.container(border=True):
+        st.subheader("Compare two documents for contradictions")
 
-    documents = _get_documents()
-    if not documents:
-        st.info("No documents ingested yet, or the API is unreachable. Run scripts/ingest.py and start the API.")
-    else:
-        doc_labels = {f"{d['doc_id']}  ({d['source']})": d["doc_id"] for d in documents}
-        col1, col2 = st.columns(2)
-        with col1:
-            label_1 = st.selectbox("Document A", list(doc_labels.keys()), key="doc1")
-        with col2:
-            options_2 = [l for l in doc_labels.keys() if l != label_1] or list(doc_labels.keys())
-            label_2 = st.selectbox("Document B", options_2, key="doc2")
+        documents = _get_documents()
+        if not documents:
+            st.info("No documents ingested yet, or the API is unreachable. Run scripts/ingest.py and start the API.")
+            compare_clicked = False
+        else:
+            doc_labels = {f"{d['doc_id']}  ({d['source']})": d["doc_id"] for d in documents}
+            col1, col2 = st.columns(2)
+            with col1:
+                label_1 = st.selectbox("Document A", list(doc_labels.keys()), key="doc1")
+            with col2:
+                options_2 = [l for l in doc_labels.keys() if l != label_1] or list(doc_labels.keys())
+                label_2 = st.selectbox("Document B", options_2, key="doc2")
 
-        topic = st.text_input("Topic (optional)", placeholder="e.g. remote work days per week")
-        top_k_c = st.slider("Top K per document", min_value=1, max_value=15, value=5, key="contradict_topk")
+            topic = st.text_input("Topic (optional)", placeholder="e.g. remote work days per week")
+            top_k_c = st.slider("Top K per document", min_value=1, max_value=15, value=5, key="contradict_topk")
 
-        if st.button("Compare", type="primary", key="contradict_btn"):
-            with st.spinner("Retrieving relevant excerpts and analyzing..."):
-                try:
-                    resp = requests.post(
-                        f"{API_BASE_URL}/contradict",
-                        json={
-                            "doc_id_1": doc_labels[label_1],
-                            "doc_id_2": doc_labels[label_2],
-                            "topic": topic or None,
-                            "top_k": top_k_c,
-                        },
-                        timeout=120,
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()
-                except requests.RequestException as exc:
-                    st.error(f"Request failed: {exc}")
-                    data = None
+            compare_clicked = st.button("Compare", type="primary", key="contradict_btn")
 
-            if data:
+    if documents and compare_clicked:
+        with st.spinner("Retrieving relevant excerpts and analyzing..."):
+            try:
+                resp = requests.post(
+                    f"{API_BASE_URL}/contradict",
+                    json={
+                        "doc_id_1": doc_labels[label_1],
+                        "doc_id_2": doc_labels[label_2],
+                        "topic": topic or None,
+                        "top_k": top_k_c,
+                    },
+                    timeout=120,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            except requests.RequestException as exc:
+                st.error(f"Request failed: {exc}")
+                data = None
+
+        if data:
+            with st.container(border=True):
                 verdict = data["verdict"]
                 verdict_display = {
                     "contradiction": ("Contradiction found", "error"),
@@ -191,13 +203,15 @@ with tab_contradict:
                 st.write(data["reasoning"])
                 st.caption(f"Response time: {data['response_time_seconds']}s")
 
-                col_a, col_b = st.columns(2)
-                with col_a:
+            col_a, col_b = st.columns(2)
+            with col_a:
+                with st.container(border=True):
                     st.markdown(f"#### Evidence from {doc_labels[label_1]}")
                     for c in data["evidence_doc_1"]:
                         with st.expander(f"{c['source']} - page {c['page']}"):
                             st.write(c["snippet"])
-                with col_b:
+            with col_b:
+                with st.container(border=True):
                     st.markdown(f"#### Evidence from {doc_labels[label_2]}")
                     for c in data["evidence_doc_2"]:
                         with st.expander(f"{c['source']} - page {c['page']}"):
