@@ -76,17 +76,27 @@ with tab_ask:
                     data = None
 
             if data:
-                st.markdown("### Answer")
-                st.write(data["answer"])
-
+                st.session_state.ask_run_id = st.session_state.get("ask_run_id", 0) + 1
                 conf = data["confidence"]
+
                 if data["low_confidence_warning"]:
                     st.warning(
                         f"Low confidence ({conf:.2f}). The retrieved context may not fully support this "
-                        "answer - please verify against the source documents."
+                        "answer - review the citations below before trusting it."
                     )
+                    revealed = st.checkbox(
+                        "I've reviewed the citations and want to see the generated answer anyway",
+                        key=f"reveal_answer_{st.session_state.ask_run_id}",
+                    )
+                    st.markdown("### Answer")
+                    if revealed:
+                        st.write(data["answer"])
+                    else:
+                        st.info("Answer held back pending your review, since confidence is below the threshold.")
                 else:
                     st.success(f"Confidence: {conf:.2f}")
+                    st.markdown("### Answer")
+                    st.write(data["answer"])
 
                 meta_col1, meta_col2 = st.columns(2)
                 meta_col1.metric("Detected language", data["detected_language"])
